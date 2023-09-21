@@ -10,18 +10,22 @@ use yew::prelude::*;
 use web_sys::{HtmlInputElement, HtmlCanvasElement, CanvasRenderingContext2d};
 use wasm_bindgen::{JsCast, JsValue};
 
+use gloo::{console::{self, Timer}, timers::callback};
+use gloo::timers::callback::{Interval, Timeout};
+
 fn main() {
     println!("Hello, world!");
-    let mut game: ConnectFourGameV2 = ConnectFourGameV2::create();
+    // let mut game: ConnectFourGameV2 = ConnectFourGameV2::create();
 
-    
-    println!("{}",game);
-    game.make_move(2);
-    println!("{}",game);
-    game.make_move(3);
-    println!("{}",game);
-    game.undo_move();
-    println!("{}",game);
+    yew::start_app::<RootComponent>();
+
+    // println!("{}",game);
+    // game.make_move(2);
+    // println!("{}",game);
+    // game.make_move(3);
+    // println!("{}",game);
+    // game.undo_move();
+    // println!("{}",game);
 
     
     // let mut run: bool = true;
@@ -44,7 +48,114 @@ fn main() {
     // println!("ended!");
 }
 
+enum GameMsg{
+    MakeMove(u32),
+    DoBotMove,
+    PlayerUpdate,
+    BotUpdate,
+}
 
+
+struct RootComponent{
+    game: ConnectFourGameV2,
+    temp_prev: u32,
+    timeout: Option<Timeout>
+}
+
+impl Component for RootComponent{
+    type Message = GameMsg;
+    type Properties = ();
+
+    fn create(ctx: &Context<Self>) -> Self {
+        Self{game: ConnectFourGameV2::create(), temp_prev: 0, timeout:Option::None}
+    }
+
+    fn update(&mut self, _ctx: &Context<Self>, msg: Self::Message) -> bool{
+        match msg {
+            GameMsg::MakeMove(col) => {
+                self.game.make_move(col);
+                self.temp_prev=col;
+                let handle = {
+                    let link = _ctx.link().clone();
+                    Timeout::new(1, move || link.send_message(GameMsg::DoBotMove))
+                };
+
+                self.timeout = Some(handle);
+                //_ctx.link().callback(|msg: GameMsg| msg).emit(GameMsg::DoBotMove);
+            }
+            GameMsg::DoBotMove => {
+                let col = ConnectFourSolver::best_move(&mut self.game);
+                self.game.make_move(col);
+                self.temp_prev=col;
+                //_ctx.link().callback(|msg: GameMsg| msg).emit(GameMsg::BotUpdate);
+            }
+            GameMsg::PlayerUpdate => {
+                self.temp_prev=0;
+                //_ctx.link().callback(move |msg: GameMsg| msg).emit(GameMsg::DoBotMove);
+            }
+            GameMsg::BotUpdate => {
+                self.temp_prev=0;
+            }
+        }
+        true
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let link = ctx.link();
+        // if self.temp_prev!=0{
+        //     link.callback(|msg:GameMsg| msg).emit(GameMsg::PlayerUpdate);
+        // }
+        html!{
+            <div class="content">
+                if self.game.check_p1_wins(){
+                    <h1>{"You Win!"}</h1>
+                }else if self.game.check_p2_wins(){
+                    <h1>{"You Lost!"}</h1>
+                }else{
+                    <h1>{"Connect 4 Solver"}</h1>
+                }
+                <div class="board">
+                {
+                    (0..7).map(|n|{
+                        html!{
+                            <button class="board-column" onclick={link.callback(move |_| GameMsg::MakeMove(n))}>
+                                {(0..(self.game.col_height(n))).map(|h|{html!{
+                                    //<span class="dot1"/>
+                                    /* 
+                                    if h==self.game.col_height(n){
+                                        <span class="dot1" style="transform:translate(0%,0%)"/> // style="transform:translate(0%,0%)"
+                                    }else if self.game.get_tile_state(n,h)!=0{
+                                        if self.game.get_tile_state(n,h)==1{<span class="dot1" style={format!("transform:translate(0%,{}%)",100*(6-h))}/>} //style={format!("transform:translate(0%,{}%)",100*(6-h))}
+                                        else {<span class="dot1" style={format!("transform:translate(0%,{}%)",100*(6-h))}/>} //style={format!("transform:translate(0%,{}%)",100*(6-h))}
+                                    }*/
+                                    if self.game.get_tile_state(n,h)==1{
+                                        <span class="dot1"/>
+                                    }else if self.game.get_tile_state(n,h)==-1{
+                                        <span class="dot2"/>
+                                    }
+                                }}).collect::<Html>()}
+                            </button>
+                        }
+                    }).collect::<Html>()
+                }
+                </div>
+                //<span class="dot" style={"@keyframes anim{0%{transform: translateY(0%)}100%{transform: translateY(-200%)}}"}/>
+                //<span class="dot1" style="transform:translate(0%,200%)"/>
+                //<p style="color:#bbb;">{"hey"}</p>
+                //<img src="https://www.vecteezy.com/blog/wp-content/uploads/2021/08/svg-file.jpg" style="transform:translate(100px,200px)"/>
+                //<button onclick={link.callback(|_| GameMsg::MakeMove(200))}>
+    //      ^^^^^^^ event listener name
+                //{ "Click me!" }
+                //</button>
+                //</div>
+        
+            </div>
+        }
+    }
+}
+
+
+#[derive(Clone)]
 struct ConnectFourGameV2{
     p1_positions: u64,
     p2_positions: u64,
@@ -57,17 +168,11 @@ impl ConnectFourGameV2{
     fn make_move(&mut self, column: u32) -> bool{
         if !self.can_play_move(column) {return false}
         if self.is_p1s_turn(){
-            //self.p1_positions = self.p1_positions|((Self::col_mask(column) & self.p1_positions)<<7);
-            println!("{}",column);
-            println!("{:?}",to_base_2_rev(Self::row_mask(0)));
-            println!("{}",Self::col_mask(2)&Self::row_mask(0));
-            println!("{:?}",to_base_2_rev(1028));
-            self.p1_positions += Self::col_mask(column)&Self::row_mask(self.col_height(column));
-            println!("{}",self.p1_positions);
             self.prev_positions.push(self.p1_positions);
+            self.p1_positions += Self::col_mask(column)&Self::row_mask(self.col_height(column));
         }else{
-            self.p2_positions += Self::col_mask(column)&Self::row_mask(self.col_height(column));
             self.prev_positions.push(self.p2_positions);
+            self.p2_positions += Self::col_mask(column)&Self::row_mask(self.col_height(column));
         }
         return true;
     }
@@ -110,6 +215,9 @@ impl ConnectFourGameV2{
         (self.p2_positions & self.p2_positions<<8 & self.p2_positions<<16 & self.p2_positions<<24)>0||
         (self.p2_positions & self.p2_positions<<7 & self.p2_positions<<14 & self.p2_positions<<21)>0||
         (self.p2_positions & self.p2_positions<<9 & self.p2_positions<<18 & self.p2_positions<<27)>0;
+    }
+    fn get_tile_state(&self, col: u32, row: u32) -> i32{
+        if self.p1_positions & Self::row_mask(row) & Self::col_mask(col) > 0 {1} else if self.p2_positions & Self::row_mask(row) & Self::col_mask(col) > 0 {-1} else {0}
     }
 }
 
@@ -251,40 +359,58 @@ struct ConnectFourSolver;
 
 impl ConnectFourSolver{
     fn best_move(game: &mut ConnectFourGameV2) -> u32{
-        let my_player: TileState = if game.is_p1s_turn() {TileState::Player1} else {TileState::Player2};
-        let mut legal_moves: Vec<u32> = Vec::new();
-        let mut not_losing_moves: Vec<u32> = Vec::new();
+        let my_player: i32 = if game.is_p1s_turn() {1} else {-1};
+        let mut best_move_eval: i32 = -100;
+        let mut best_move: u32 = 0;
         for i in 0..7{
             if game.make_move(i){
-                let res: TileState = Self::evaluate(game, 6);
+                let res: i32 = Self::evaluate(game, 0, 6, -100, 100);
                 game.undo_move();
                 println!("{}, {}",my_player.to_string(), res.to_string());
-                legal_moves.push(i);
-                if res==my_player {return i}
-                else if res==TileState::Blank {not_losing_moves.push(i)}
+                if res*my_player>best_move_eval {best_move_eval=res*my_player; best_move=i}
+            }else{
+                if best_move==i {best_move+=1}
             }
         }
-        return not_losing_moves.pop().unwrap_or(legal_moves.pop().unwrap_or(0));
+        return best_move
     }
-    fn evaluate(game: &mut ConnectFourGameV2, max_depth: u32) -> TileState{ // -1 = player2 win, 1 = player1 win, 0 = draw
+    fn evaluate(game: &mut ConnectFourGameV2, curr_dep: i32, max_depth: i32, a: i32, b: i32) -> i32{ // -1 = player2 win, 1 = player1 win, 0 = draw
+        let mut alpha = a;
+        let mut beta = b;
         if game.check_p1_wins(){
-            return TileState::Player1
+            return max_depth-curr_dep
         }else if game.check_p2_wins(){
-            return TileState::Player2
+            return -max_depth+curr_dep
         }
-        if max_depth==0 {return TileState::Blank}
-        for i in 0..7{
-            if game.make_move(i){
-                let eval: TileState = Self::evaluate(game, max_depth-1);
-                game.undo_move();
-                if game.is_p1s_turn() && eval==TileState::Player1{
-                    return eval
-                }else if !game.is_p1s_turn() && eval==TileState::Player2{
-                    return eval;
+        if curr_dep>=max_depth {return 0}
+        if game.is_p1s_turn(){
+            let mut value: i32 = -100;
+            for i in 0..7{
+                if game.make_move(i){
+                    value = value.max(Self::evaluate(game, curr_dep+1, max_depth, alpha, beta));
+                    game.undo_move();
+                    if value>b{
+                        return value
+                    }
+                    alpha=alpha.max(value);
                 }
             }
+            return value
+        }else{
+            let mut value: i32 = 100;
+            for i in 0..7{
+                if game.make_move(i){
+                    value = value.min(Self::evaluate(game, curr_dep+1, max_depth, alpha, beta));
+                    game.undo_move();
+                    if value<a{
+                        return value
+                    }
+                    beta=beta.min(value);
+                }
+            }
+            return value
         }
-        return TileState::Blank
+        return 0
     }
 }
 
